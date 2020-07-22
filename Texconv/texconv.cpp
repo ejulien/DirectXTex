@@ -25,7 +25,7 @@
 
 #include <fstream>
 #include <memory>
-#include <list>
+#include <vector>
 
 #include <wrl\client.h>
 
@@ -57,20 +57,15 @@ namespace
 {
     enum OPTIONS
     {
-        OPT_RECURSIVE = 1,
-        OPT_FILELIST,
-        OPT_WIDTH,
+        OPT_WIDTH = 1,
         OPT_HEIGHT,
+		OPT_MAXSIZE,
         OPT_MIPLEVELS,
         OPT_FORMAT,
         OPT_FILTER,
         OPT_SRGBI,
         OPT_SRGBO,
         OPT_SRGB,
-        OPT_PREFIX,
-        OPT_SUFFIX,
-        OPT_OUTPUTDIR,
-        OPT_TOLOWER,
         OPT_OVERWRITE,
         OPT_FILETYPE,
         OPT_HFLIP,
@@ -142,20 +137,15 @@ namespace
 
     const SValue g_pOptions[] =
     {
-        { L"r",             OPT_RECURSIVE },
-        { L"flist",         OPT_FILELIST },
         { L"w",             OPT_WIDTH },
         { L"h",             OPT_HEIGHT },
+        { L"maxsize",       OPT_MAXSIZE },
         { L"m",             OPT_MIPLEVELS },
         { L"f",             OPT_FORMAT },
         { L"if",            OPT_FILTER },
         { L"srgbi",         OPT_SRGBI },
         { L"srgbo",         OPT_SRGBO },
         { L"srgb",          OPT_SRGB },
-        { L"px",            OPT_PREFIX },
-        { L"sx",            OPT_SUFFIX },
-        { L"o",             OPT_OUTPUTDIR },
-        { L"l",             OPT_TOLOWER },
         { L"y",             OPT_OVERWRITE },
         { L"ft",            OPT_FILETYPE },
         { L"hflip",         OPT_HFLIP },
@@ -519,80 +509,6 @@ namespace
         return L"";
     }
 
-    void SearchForFiles(const wchar_t* path, std::list<SConversion>& files, bool recursive)
-    {
-        // Process files
-        WIN32_FIND_DATAW findData = {};
-        ScopedFindHandle hFile(safe_handle(FindFirstFileExW(path,
-            FindExInfoBasic, &findData,
-            FindExSearchNameMatch, nullptr,
-            FIND_FIRST_EX_LARGE_FETCH)));
-        if (hFile)
-        {
-            for (;;)
-            {
-                if (!(findData.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_DIRECTORY)))
-                {
-                    wchar_t drive[_MAX_DRIVE] = {};
-                    wchar_t dir[_MAX_DIR] = {};
-                    _wsplitpath_s(path, drive, _MAX_DRIVE, dir, _MAX_DIR, nullptr, 0, nullptr, 0);
-
-                    SConversion conv;
-                    _wmakepath_s(conv.szSrc, drive, dir, findData.cFileName, nullptr);
-                    files.push_back(conv);
-                }
-
-                if (!FindNextFileW(hFile.get(), &findData))
-                    break;
-            }
-        }
-
-        // Process directories
-        if (recursive)
-        {
-            wchar_t searchDir[MAX_PATH] = {};
-            {
-                wchar_t drive[_MAX_DRIVE] = {};
-                wchar_t dir[_MAX_DIR] = {};
-                _wsplitpath_s(path, drive, _MAX_DRIVE, dir, _MAX_DIR, nullptr, 0, nullptr, 0);
-                _wmakepath_s(searchDir, drive, dir, L"*", nullptr);
-            }
-
-            hFile.reset(safe_handle(FindFirstFileExW(searchDir,
-                FindExInfoBasic, &findData,
-                FindExSearchLimitToDirectories, nullptr,
-                FIND_FIRST_EX_LARGE_FETCH)));
-            if (!hFile)
-                return;
-
-            for (;;)
-            {
-                if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-                {
-                    if (findData.cFileName[0] != L'.')
-                    {
-                        wchar_t subdir[MAX_PATH] = {};
-
-                        {
-                            wchar_t drive[_MAX_DRIVE] = {};
-                            wchar_t dir[_MAX_DIR] = {};
-                            wchar_t fname[_MAX_FNAME] = {};
-                            wchar_t ext[_MAX_FNAME] = {};
-                            _wsplitpath_s(path, drive, dir, fname, ext);
-                            wcscat_s(dir, findData.cFileName);
-                            _wmakepath_s(subdir, drive, dir, fname, ext);
-                        }
-
-                        SearchForFiles(subdir, files, recursive);
-                    }
-                }
-
-                if (!FindNextFileW(hFile.get(), &findData))
-                    break;
-            }
-        }
-    }
-
     void PrintFormat(DXGI_FORMAT Format)
     {
         for (const SValue *pFormat = g_pFormats; pFormat->pName; pFormat++)
@@ -735,20 +651,15 @@ namespace
     {
         PrintLogo();
 
-        wprintf(L"Usage: texconv <options> <files>\n\n");
-        wprintf(L"   -r                  wildcard filename search is recursive\n");
-        wprintf(L"   -flist <filename>   use text file with a list of input files (one per line)\n");
-        wprintf(L"\n   -w <n>              width\n");
+        wprintf(L"Usage: texconv <options> <input> <output>\n\n");
+        wprintf(L"   -w <n>              width\n");
         wprintf(L"   -h <n>              height\n");
+        wprintf(L"   -maxsize <n>        maximum size on any axis\n");
         wprintf(L"   -m <n>              miplevels\n");
         wprintf(L"   -f <format>         format\n");
         wprintf(L"\n   -if <filter>        image filtering\n");
         wprintf(L"   -srgb{i|o}          sRGB {input, output}\n");
-        wprintf(L"\n   -px <string>        name prefix\n");
-        wprintf(L"   -sx <string>        name suffix\n");
-        wprintf(L"   -o <directory>      output directory\n");
-        wprintf(L"   -l                  force output filename to lower case\n");
-        wprintf(L"   -y                  overwrite existing output file (if any)\n");
+        wprintf(L"\n   -y                  overwrite existing output file (if any)\n");
         wprintf(L"   -ft <filetype>      output file type\n");
         wprintf(L"\n   -hflip              horizonal flip of source image\n");
         wprintf(L"   -vflip              vertical flip of source image\n");
@@ -1039,6 +950,7 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
     TEX_FILTER_FLAGS dwFilterOpts = TEX_FILTER_DEFAULT;
     DWORD FileType = CODEC_DDS;
     DWORD maxSize = 16384;
+	DWORD user_maxSize = 0;
     int adapter = -1;
     float alphaThreshold = TEX_THRESHOLD_DEFAULT;
     float alphaWeight = 1.f;
@@ -1050,10 +962,6 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
     float paperWhiteNits = 200.f;
     float preserveAlphaCoverageRef = 0.0f;
 
-    wchar_t szPrefix[MAX_PATH] = {};
-    wchar_t szSuffix[MAX_PATH] = {};
-    wchar_t szOutputDir[MAX_PATH] = {};
-
     // Initialize COM (needed for WIC)
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hr))
@@ -1064,7 +972,7 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
 
     // Process command line
     DWORD64 dwOptions = 0;
-    std::list<SConversion> conversion;
+    SConversion conv;
 
     for (int iArg = 1; iArg < argc; iArg++)
     {
@@ -1095,12 +1003,10 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
             {
             case OPT_WIDTH:
             case OPT_HEIGHT:
+            case OPT_MAXSIZE:
             case OPT_MIPLEVELS:
             case OPT_FORMAT:
             case OPT_FILTER:
-            case OPT_PREFIX:
-            case OPT_SUFFIX:
-            case OPT_OUTPUTDIR:
             case OPT_FILETYPE:
             case OPT_GPU:
             case OPT_FEATURE_LEVEL:
@@ -1111,7 +1017,6 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
             case OPT_WIC_QUALITY:
             case OPT_BC_COMPRESS:
             case OPT_COLORKEY:
-            case OPT_FILELIST:
             case OPT_ROTATE_COLOR:
             case OPT_PAPER_WHITE_NITS:
             case OPT_PRESERVE_ALPHA_COVERAGE:
@@ -1145,6 +1050,16 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
                 if (swscanf_s(pValue, L"%zu", &height) != 1)
                 {
                     wprintf(L"Invalid value specified with -h (%ls)\n", pValue);
+                    printf("\n");
+                    PrintUsage();
+                    return 1;
+                }
+                break;
+
+            case OPT_MAXSIZE:
+                if (swscanf_s(pValue, L"%lu", &user_maxSize) != 1)
+                {
+                    wprintf(L"Invalid value specified with -maxisze (%ls)\n", pValue);
                     printf("\n");
                     PrintUsage();
                     return 1;
@@ -1216,18 +1131,6 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
 
             case OPT_NO_WIC:
                 dwFilterOpts |= TEX_FILTER_FORCE_NON_WIC;
-                break;
-
-            case OPT_PREFIX:
-                wcscpy_s(szPrefix, MAX_PATH, pValue);
-                break;
-
-            case OPT_SUFFIX:
-                wcscpy_s(szSuffix, MAX_PATH, pValue);
-                break;
-
-            case OPT_OUTPUTDIR:
-                wcscpy_s(szOutputDir, MAX_PATH, pValue);
                 break;
 
             case OPT_FILETYPE:
@@ -1507,48 +1410,6 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
                 }
                 break;
 
-            case OPT_FILELIST:
-            {
-                std::wifstream inFile(pValue);
-                if (!inFile)
-                {
-                    wprintf(L"Error opening -flist file %ls\n", pValue);
-                    return 1;
-                }
-                wchar_t fname[1024] = {};
-                for (;;)
-                {
-                    inFile >> fname;
-                    if (!inFile)
-                        break;
-
-                    if (*fname == L'#')
-                    {
-                        // Comment
-                    }
-                    else if (*fname == L'-')
-                    {
-                        wprintf(L"Command-line arguments not supported in -flist file\n");
-                        return 1;
-                    }
-                    else if (wcspbrk(fname, L"?*") != nullptr)
-                    {
-                        wprintf(L"Wildcards not supported in -flist file\n");
-                        return 1;
-                    }
-                    else
-                    {
-                        SConversion conv;
-                        wcscpy_s(conv.szSrc, MAX_PATH, fname);
-                        conversion.push_back(conv);
-                    }
-
-                    inFile.ignore(1000, '\n');
-                }
-                inFile.close();
-            }
-            break;
-
             case OPT_PAPER_WHITE_NITS:
                 if (swscanf_s(pValue, L"%f", &paperWhiteNits) != 1)
                 {
@@ -1578,28 +1439,16 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
                 break;
             }
         }
-        else if (wcspbrk(pArg, L"?*") != nullptr)
-        {
-            size_t count = conversion.size();
-            SearchForFiles(pArg, conversion, (dwOptions & (DWORD64(1) << OPT_RECURSIVE)) != 0);
-            if (conversion.size() <= count)
-            {
-                wprintf(L"No matching files found for %ls\n", pArg);
-                return 1;
-            }
-        }
         else
         {
-            SConversion conv;
-            wcscpy_s(conv.szSrc, MAX_PATH, pArg);
-
-            conv.szDest[0] = 0;
-
-            conversion.push_back(conv);
+			if (iArg == argc - 2)
+	            wcscpy_s(conv.szSrc, MAX_PATH, pArg);
+			else
+	            wcscpy_s(conv.szDest, MAX_PATH, pArg);
         }
     }
 
-    if (conversion.empty())
+    if (!conv.szSrc[0] || !conv.szDest[0])
     {
         PrintUsage();
         return 0;
@@ -1607,27 +1456,6 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
 
     if (~dwOptions & (DWORD64(1) << OPT_NOLOGO))
         PrintLogo();
-
-    // Work out out filename prefix and suffix
-    if (szOutputDir[0] && (L'\\' != szOutputDir[wcslen(szOutputDir) - 1]))
-        wcscat_s(szOutputDir, MAX_PATH, L"\\");
-
-    if (szPrefix[0])
-        wcscat_s(szOutputDir, MAX_PATH, szPrefix);
-
-    wcscpy_s(szPrefix, MAX_PATH, szOutputDir);
-
-    auto fileTypeName = LookupByValue(FileType, g_pSaveFileTypes);
-
-    if (fileTypeName)
-    {
-        wcscat_s(szSuffix, MAX_PATH, L".");
-        wcscat_s(szSuffix, MAX_PATH, fileTypeName);
-    }
-    else
-    {
-        wcscat_s(szSuffix, MAX_PATH, L".unknown");
-    }
 
     if (FileType != CODEC_DDS)
     {
@@ -1653,10 +1481,9 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
     bool preserveAlphaCoverage = false;
     ComPtr<ID3D11Device> pDevice;
 
-    for (auto pConv = conversion.begin(); pConv != conversion.end(); ++pConv)
+	for (int _i_ = 0; _i_ < 1; ++_i_) // so that the continues may continue...
     {
-        if (pConv != conversion.begin())
-            wprintf(L"\n");
+		auto pConv = &conv;
 
         // --- Load source image -------------------------------------------------------
         wprintf(L"reading %ls", pConv->szSrc);
@@ -2037,23 +1864,22 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
         }
 
         // --- Resize ------------------------------------------------------------------
-        size_t twidth = (!width) ? info.width : width;
-        if (twidth > maxSize)
-        {
-            if (!width)
-                twidth = maxSize;
-            else
-                sizewarn = true;
-        }
+        maxSize = user_maxSize == 0 || maxSize < user_maxSize ? maxSize : user_maxSize;
 
-        size_t theight = (!height) ? info.height : height;
-        if (theight > maxSize)
-        {
-            if (!height)
-                theight = maxSize;
-            else
-                sizewarn = true;
-        }
+		size_t twidth = width ? width : info.width;
+		size_t theight = height ? height : info.height;
+
+		if (twidth > maxSize)
+		{
+            theight = (theight * maxSize) / twidth;
+            twidth = maxSize;
+		}
+
+		if (theight > maxSize)
+		{
+            twidth = (twidth * maxSize) / theight;
+            theight = maxSize;
+		}
 
         if (dwOptions & (DWORD64(1) << OPT_FIT_POWEROF2))
         {
@@ -3047,30 +2873,6 @@ int __cdecl wmain(_In_ int argc, _In_z_count_(argc) wchar_t* argv[])
 
             PrintInfo(info);
             wprintf(L"\n");
-
-            // Figure out dest filename
-            wchar_t *pchSlash, *pchDot;
-
-            wcscpy_s(pConv->szDest, MAX_PATH, szPrefix);
-
-            pchSlash = wcsrchr(pConv->szSrc, L'\\');
-            if (pchSlash)
-                wcscat_s(pConv->szDest, MAX_PATH, pchSlash + 1);
-            else
-                wcscat_s(pConv->szDest, MAX_PATH, pConv->szSrc);
-
-            pchSlash = wcsrchr(pConv->szDest, '\\');
-            pchDot = wcsrchr(pConv->szDest, '.');
-
-            if (pchDot > pchSlash)
-                *pchDot = 0;
-
-            wcscat_s(pConv->szDest, MAX_PATH, szSuffix);
-
-            if (dwOptions & (DWORD64(1) << OPT_TOLOWER))
-            {
-                (void)_wcslwr_s(pConv->szDest);
-            }
 
             // Write texture
             wprintf(L"writing %ls", pConv->szDest);
